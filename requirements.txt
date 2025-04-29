@@ -1,0 +1,10 @@
+pandas
+python-dotenv
+duckdb
+lxml
+pyarrow
+requests
+pytest
+pytest-mock
+patch
+plotly
