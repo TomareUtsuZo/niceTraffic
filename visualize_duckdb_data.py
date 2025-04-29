@@ -38,118 +38,118 @@ def run_visualization(db_path: str, transformed_table: str, output_file: str):
         duckdb_con = duckdb.connect(database=db_path, read_only=True)
         print("✅ DuckDB connection successful (read-only).")
 
-        # --- Query Data from Transformed Table ---
+        # --- Query Transformed Data ---
         print(f"\nQuerying data from table: '{transformed_table}'...")
         try:
-            # Check if the transformed table exists
+            # Check if the transformed table exists and has data
             table_exists = duckdb_con.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{transformed_table}'").fetchone()[0] > 0
-
             if not table_exists:
-                 print(f"❌ Table '{transformed_table}' does not exist in the database '{db_path}'. Please run the transformation script first.")
-                 # Decide if we should exit or return False/None
-                 # Let's raise an exception to signal failure
-                 raise duckdb.CatalogException(f"Table '{transformed_table}' not found.")
+                print(f"❌ Transformed table '{transformed_table}' not found. Cannot generate visualization.")
+                return
 
+            row_count = duckdb_con.execute(f"SELECT COUNT(*) FROM {transformed_table}").fetchone()[0]
+            print(f"✅ Successfully queried {row_count} rows from '{transformed_table}'.")
 
-            # Query all data from the transformed table
-            # Ensure transformation_timestamp is included for time series plots
-            df_transformed = duckdb_con.execute(f"SELECT * FROM {transformed_table}").fetchdf()
+            if row_count == 0:
+                print("⚠️ Transformed table is empty. No data to visualize.")
+                return
 
-            if df_transformed.empty:
-                print(f"Table '{transformed_table}' is empty. No data to visualize.")
-                return # Return gracefully if no data
+            # Fetch data into a pandas DataFrame
+            # MODIFIED: Select the new aggregated column name 'avg_transit_time_minutes'
+            transformed_df = duckdb_con.execute(f"""
+                SELECT
+                    location_name,
+                    avg_transit_time_minutes, -- Use the new aggregated column name
+                    transformation_timestamp,
+                    weather_description,
+                    temperature_celsius
+                FROM {transformed_table}
+                ORDER BY transformation_timestamp, location_name -- Order for better plot
+            """).fetchdf()
 
-            print(f"✅ Successfully queried {len(df_transformed)} rows from '{transformed_table}'.")
-            # print(df_transformed.head()) # Optional: Print head for debugging
-
-            # Ensure the timestamp column is datetime type for plotting
-            if 'transformation_timestamp' in df_transformed.columns:
-                 df_transformed['transformation_timestamp'] = pd.to_datetime(df_transformed['transformation_timestamp'], errors='coerce')
-            else:
-                 print("Warning: 'transformation_timestamp' column not found. Time series plots may not work.")
-
-
-        except duckdb.Error as e:
-            print(f"❌ DuckDB Error querying table '{transformed_table}': {e}")
-            traceback.print_exc()
-            raise # Re-raise the exception for the caller
+        except duckdb.CatalogException:
+             print(f"❌ Table '{transformed_table}' not found during query.")
+             return
         except Exception as e:
-            print(f"❌ An unexpected error occurred querying '{transformed_table}': {e}")
-            traceback.print_exc()
-            raise # Re-raise the exception for the caller
-    finally:
-        # Ensure the DuckDB connection is closed
-        if duckdb_con:
+             print(f"❌ Error querying transformed data: {e}")
+             traceback.print_exc()
+             return # Exit visualization if query fails
+
+
+        # --- Generate Visualizations ---
+        print("\nGenerating time series visualizations...")
+        figures = []
+
+        # Check for required columns in the DataFrame
+        # MODIFIED: Check for the new aggregated column name
+        required_cols = ['location_name', 'avg_transit_time_minutes', 'transformation_timestamp']
+        if not all(col in transformed_df.columns for col in required_cols):
+            print(f"Skipping Transit Time over Time plot due to missing required columns.")
+            print(f"Required: {required_cols}, Found: {transformed_df.columns.tolist()}")
+        else:
             try:
-                duckdb_con.close()
-                print("\n✅ DuckDB connection closed.")
+                # Transit Time Over Time by Location
+                # MODIFIED: Use the new aggregated column name for the y-axis
+                fig_transit_time = px.line(
+                    transformed_df,
+                    x="transformation_timestamp",
+                    y="avg_transit_time_minutes", # Use the new aggregated column name
+                    color="location_name",
+                    title="Average Transit Time Over Time by Location",
+                    labels={
+                        "transformation_timestamp": "Time",
+                        "avg_transit_time_minutes": "Average Transit Time (minutes)", # Update label
+                        "location_name": "Location"
+                    },
+                    hover_data={
+                        "weather_description": True,
+                        "temperature_celsius": True,
+                        "avg_transit_time_minutes": ':.2f' # Format hover data
+                    }
+                )
+                fig_transit_time.update_layout(hovermode="x unified") # Unified hover for time series
+                figures.append(fig_transit_time)
+                print("✅ Generated Average Transit Time Over Time plot.")
+
             except Exception as e:
-                 print(f"Warning: Error closing DuckDB connection: {e}")
-                 traceback.print_exc()
+                print(f"❌ Error generating Transit Time plot: {e}")
+                traceback.print_exc()
 
 
-    # --- Generate Visualizations using Plotly (Time Series Focus) ---
-    print("\nGenerating time series visualizations...")
+        if not figures:
+            print("No figures were generated. Check data and column names.")
+            return # Exit if no figures were created
 
-    # Create a list to hold Plotly figures
-    figures = []
+        # --- Save and Open HTML File ---
+        print(f"\nSaving visualization to HTML file: '{output_file}'...")
+        try:
+            # Create a single HTML file containing all figures
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write("<html><head><title>Weather and Traffic Visualization</title></head><body>\n")
+                f.write("<h1>Weather and Traffic Visualization</h1>\n")
+                for i, fig in enumerate(figures):
+                    f.write(f"<h2>Figure {i+1}</h2>\n")
+                    f.write(fig.to_html(full_html=False, include_plotlyjs='cdn')) # Embed figures
+                f.write("</body></html>")
 
-    # Visualization 1: Transit Time over Time, faceted by Location
-    # ONLY KEEPING THIS PLOT
-    if 'transformation_timestamp' in df_transformed.columns and 'transit_time_minutes' in df_transformed.columns and 'location_name' in df_transformed.columns:
-        fig1 = px.line(df_transformed,
-                       x="transformation_timestamp",
-                       y="transit_time_minutes",
-                       color="location_name", # Color lines by location
-                       line_group="location_name", # Ensure separate lines per location
-                       hover_name="location_name",
-                       title="Transit Time Over Time by Location")
-        figures.append(fig1)
-    else:
-         print("Skipping Transit Time over Time plot due to missing required columns.")
+            print(f"✅ Visualization saved successfully to '{output_file}'.")
 
-
-    if not figures:
-         print("No figures were generated. Check data and column names.")
-         return # Return gracefully if no figures were created
-
-
-    # --- Generate HTML Output ---
-    print(f"\nGenerating HTML file: {output_file}...")
-
-    # Create an HTML string containing all figures
-    html_content = "<html><head><title>Weather and Traffic Visualization Over Time</title></head><body>"
-    html_content += "<h1>Weather and Traffic Data Visualization Over Time</h1>"
-
-    for i, fig in enumerate(figures):
-        # Add each figure as an HTML div
-        html_content += fig.to_html(full_html=False, include_plotlyjs='cdn')
-        # Removed the horizontal rule as there's only one plot
-        # html_content += "<hr>" # Add a separator between plots
-
-    html_content += "</body></html>"
-
-    # Save the HTML content to a file
-    try:
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        print(f"✅ HTML file saved successfully: {output_file}")
-    except IOError as e:
-        print(f"❌ Error saving HTML file '{output_file}': {e}")
-        traceback.print_exc()
-        raise # Re-raise the exception for the caller
+            # Open the HTML file in the default web browser
+            # Check if running in an environment where a browser can be opened
+            if os.name != 'posix' or 'DISPLAY' in os.environ: # Basic check for graphical environment
+                 try:
+                     webbrowser.open(f'file://{os.path.abspath(output_file)}')
+                     print(f"✅ Opened '{output_file}' in default web browser.")
+                 except Exception as e:
+                     print(f"⚠️ Could not automatically open web browser: {e}")
+                     print(f"Please open the file manually: {os.path.abspath(output_file)}")
+            else:
+                 print(f"Running in a non-graphical environment. Please open the file manually: {os.path.abspath(output_file)}")
 
 
-    # --- Launch in Browser ---
-    print(f"\nLaunching '{output_file}' in default web browser...")
-    try:
-        webbrowser.open(f"file://{os.path.abspath(output_file)}")
-        print("✅ Launched successfully.")
-    except Exception as e:
-        print(f"❌ Error launching web browser: {e}")
-        print(f"You can manually open the file: {os.path.abspath(output_file)}")
-        traceback.print_exc()
-        # Don't necessarily re-raise here, as the file was saved
+        except Exception as e:
+            print(f"❌ Error saving or opening HTML file: {e}")
+            traceback.print_exc()
 
 
     except duckdb.Error as e:
@@ -173,7 +173,7 @@ def run_visualization(db_path: str, transformed_table: str, output_file: str):
 
 # --- Main Execution Block (for standalone testing) ---
 if __name__ == "__main__":
-    print("Running visualize_duckdb_data.py standalone...")
+    print("Running visualize_duckdb_data.py standalone...\n")
     # This block allows running the script directly for testing the visualization function
     db_path = DUCKDB_DATABASE_PATH
     transformed_table = TRANSFORMED_TABLE_NAME

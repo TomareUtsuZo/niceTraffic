@@ -14,17 +14,17 @@ project_root = os.path.abspath(os.getcwd())
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# --- Import Functions and Configuration from ETL and Viz Scripts ---
+# --- Import Functions and Configuration from ELT and Viz Scripts ---
 try:
-    # Import from Traffic ETL (assuming extract and load are separate scripts)
+    # Import from Traffic ETL (now in ELTscripts)
     # Import the extraction/transformation function and CONFIG
-    from extract_traffic_duckdb import extract_and_transform_traffic_data, CONFIG as TRAFFIC_CONFIG
+    from ELTscripts.extract_traffic_duckdb import extract_and_transform_traffic_data, CONFIG as TRAFFIC_CONFIG
     # Import the loading function
-    from load_traffic_duckdb import load_dataframe_to_duckdb
+    from ELTscripts.load_traffic_duckdb import load_dataframe_to_duckdb
 
-    # Import from Weather ETL
+    # Import from Weather ETL (now in ELTscripts)
     # Import the necessary functions and configuration variables
-    from extract_weather_duckdb import (
+    from ELTscripts.extract_weather_duckdb import (
         construct_weather_api_url,
         fetch_data_from_api,
         parse_weather_response_to_dataframe,
@@ -35,16 +35,15 @@ try:
         API_TIMEOUT_SECONDS as WEATHER_API_TIMEOUT
     )
 
-    # Import the transformation function (from the refactored script)
-    from transform_weather_traffic_duckdb import run_transformation, TRANSFORMED_TABLE_NAME
+    # Import the transformation function (now in ELTscripts)
+    from ELTscripts.transform_weather_traffic_duckdb import run_transformation, TRANSFORMED_TABLE_NAME
 
-    # Import the visualization function and output file name (from the refactored script)
+    # Import the visualization function and output file name (these remain in the root)
     from visualize_duckdb_data import run_visualization, OUTPUT_HTML_FILE
 
 except ImportError as e:
     print(f"Error: Could not import necessary modules or functions.")
-    print(f"Ensure all ETL, transformation, and visualization scripts are in the project root ({project_root})")
-    print(f"and contain the expected functions/variables. Details: {e}")
+    print(f"Ensure ELT scripts are in the 'ELTscripts' subfolder and visualization scripts are in the project root ({project_root}). Details: {e}")
     sys.exit(1)
 
 # --- Configuration ---
@@ -65,6 +64,8 @@ TRANSFORMED_TABLE_NAME = TRANSFORMED_TABLE_NAME # Imported directly from transfo
 # For simplicity, let's define them here for the orchestration script
 WEATHER_LOCATIONS_TO_EXTRACT = [
     {"lat": 10.79187, "lon": 106.68831, "name": "Ho Chi Minh City"}, # Saigon
+    {"lat": 40.7128, "lon": -74.0060, "name": "New York City"},
+    {"lat": 51.5074, "lon": -0.1278, "name": "London"},
     # Add more locations as needed
 ]
 
@@ -190,9 +191,8 @@ if __name__ == "__main__":
                     failed_weather_locations.append(location_name)
 
             print(f"\nWeather Processing Summary:")
-            print(f"Processed {len(WEATHER_LOCATIONS_TO_EXTRACT) - len(failed_weather_locations)} out of {len(WEATHER_LOCATIONS_TO_EXTRACT)} locations.")
             if failed_weather_locations:
-                print(f"Failed weather locations ({len(failed_weather_locations)}): {', '.join(failed_locations)}")
+                print(f"Failed weather locations ({len(failed_weather_locations)}): {', '.join(failed_weather_locations)}")
             else:
                 print("All weather locations processed successfully.")
 
@@ -213,6 +213,18 @@ if __name__ == "__main__":
     print("\n--- Step 3: Running Transformation ---")
     transformation_success = False
 
+    # REMOVED: Dropping the transformed table is no longer needed to accumulate data.
+    # try:
+    #     print(f"\nAttempting to drop existing transformed table '{transformed_table}'...")
+    #     with duckdb.connect(database=db_path, read_only=False) as con:
+    #         con.execute(f"DROP TABLE IF EXISTS {transformed_table}")
+    #     print(f"Table '{transformed_table}' dropped if it existed.")
+    # except Exception as e:
+    #     print(f"❌ Error dropping transformed table: {e}")
+    #     traceback.print_exc()
+    #     # Continue the pipeline even if dropping fails, transformation might still work if table was already gone.
+
+
     # Only run transformation if both ETL steps had some success or didn't fail critically
     # Check if the source tables actually exist and have data before transforming
     try:
@@ -223,6 +235,7 @@ if __name__ == "__main__":
         if traffic_count and weather_count:
             try:
                 # Call the transformation function
+                # The transformation function itself is responsible for appending or creating the table
                 run_transformation(db_path, weather_table, traffic_table, transformed_table)
                 transformation_success = True
                 print("✅ Transformation completed successfully.")
