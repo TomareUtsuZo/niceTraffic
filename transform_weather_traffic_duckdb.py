@@ -26,6 +26,7 @@ def run_transformation(db_path: str, weather_table: str, traffic_table: str, tra
     """
     Connects to DuckDB, performs the weather and traffic data transformation,
     and saves the result to a new table. Appends data if the table exists.
+    Aggregates traffic data by location to produce one row per location per run.
     """
     print("\n--- Running Transformation ---")
     print(f"Connecting to database: {db_path}")
@@ -37,25 +38,20 @@ def run_transformation(db_path: str, weather_table: str, traffic_table: str, tra
         print("✅ DuckDB connection successful.")
 
         # --- Define the SQL Transformation SELECT Query ---
-        # This query joins weather and traffic data and prepares the transformed data.
-        # It joins on location_name and finds the nearest weather reading in time
-        # for each traffic reading.
-        # The output includes the weather's location_name as the identifier.
-        # This SELECT statement will be used for INSERTing data.
+        # MODIFIED: Added GROUP BY and aggregation functions to get one row per location per run.
         transformation_select_sql = f"""
         SELECT
             -- Location Name (from weather data, as requested)
             w.location_name AS location_name, -- Using location_name from weather
 
-            -- Traffic Data
-            t.currentTravelTime / 60.0 AS transit_time_minutes, -- Convert seconds to minutes
-            t.confidence AS confidence_level,
-            t.extraction_timestamp AS traffic_timestamp, -- Include the original traffic timestamp
+            -- Aggregated Traffic Data for the location
+            AVG(t.currentTravelTime / 60.0) AS avg_transit_time_minutes, -- Calculate average transit time
+            AVG(t.confidence) AS avg_confidence_level, -- Calculate average confidence
 
-            -- Weather Data (from the nearest weather reading in time)
-            w.weather_description,
-            w.temperature_celsius,
-            -- Removed w.fetch_timestamp_utc from the final output
+            -- Weather Data (from the nearest weather reading in time - this will be the same for all traffic points in a location for a given run)
+            FIRST(w.weather_description) AS weather_description, -- Use FIRST as description should be consistent
+            FIRST(w.temperature_celsius) AS temperature_celsius, -- Use FIRST as temperature should be consistent
+            FIRST(t.extraction_timestamp) AS representative_traffic_timestamp, -- Representative traffic timestamp
 
             -- Metadata for the transformed record
             NOW() AS transformation_timestamp -- Timestamp of when this record was created by the transformation
@@ -63,25 +59,28 @@ def run_transformation(db_path: str, weather_table: str, traffic_table: str, tra
         FROM {traffic_table} AS t
         JOIN LATERAL (
             SELECT
-                w_inner.location_name, -- Select location_name from weather
+                w_inner.location_name,
                 w_inner.weather_description,
                 w_inner.temperature_celsius,
-                w_inner.fetch_timestamp_utc, -- Keep this here for calculating time_diff_seconds
-                -- Calculate the time difference for ordering
+                w_inner.fetch_timestamp_utc,
                 ABS(EPOCH(w_inner.fetch_timestamp_utc) - EPOCH(t.extraction_timestamp)) AS time_diff_seconds
             FROM {weather_table} AS w_inner
-            -- JOIN on location_name instead of lat/lon for potentially more robust matching
             WHERE w_inner.location_name = (
                 SELECT location_name
                 FROM {weather_table} AS w_location
                 WHERE w_location.latitude = CAST(SPLIT_PART(t.point, ',', 1) AS DOUBLE)
                   AND w_location.longitude = CAST(SPLIT_PART(t.point, ',', 2) AS DOUBLE)
-                LIMIT 1 -- Get the location name for the traffic point's coordinates
+                LIMIT 1
             )
-            ORDER BY time_diff_seconds ASC -- Order by closest timestamp
-            LIMIT 1 -- Take only the single closest weather reading for that location name
-        ) AS w ON TRUE; -- LATERAL join syntax
-
+            ORDER BY time_diff_seconds ASC
+            LIMIT 1
+        ) AS w ON TRUE
+        GROUP BY
+            w.location_name,
+            weather_description, -- Group by weather details which should be consistent
+            temperature_celsius,
+            transformation_timestamp -- Group by the timestamp of THIS transformation run
+        ;
         """
 
         # --- Explicitly Create the transformed table if it doesn't exist ---
@@ -93,14 +92,15 @@ def run_transformation(db_path: str, weather_table: str, traffic_table: str, tra
             if not table_exists:
                 print(f"Table '{transformed_table}' does not exist. Creating table with explicit schema...")
                 # Define the CREATE TABLE statement with explicit columns and types
+                # MODIFIED: Updated column names and types to match the aggregated SELECT query
                 create_table_explicit_sql = f"""
                 CREATE TABLE {transformed_table} (
                     location_name VARCHAR,
-                    transit_time_minutes DOUBLE,
-                    confidence_level DOUBLE,
-                    traffic_timestamp TIMESTAMP,
+                    avg_transit_time_minutes DOUBLE, -- Changed from transit_time_minutes
+                    avg_confidence_level DOUBLE, -- Changed from confidence_level
                     weather_description VARCHAR,
                     temperature_celsius DOUBLE,
+                    representative_traffic_timestamp TIMESTAMP, -- Added
                     transformation_timestamp TIMESTAMP
                 );
                 """
@@ -108,6 +108,8 @@ def run_transformation(db_path: str, weather_table: str, traffic_table: str, tra
                 print(f"✅ Table '{transformed_table}' created with explicit schema.")
             else:
                 print(f"Table '{transformed_table}' already exists.")
+                # Optional: Check and alert if schema is significantly different? For now, assume compatible append.
+
 
         except duckdb.Error as e:
             print(f"❌ DuckDB Error checking or creating table '{transformed_table}': {e}")
@@ -115,11 +117,10 @@ def run_transformation(db_path: str, weather_table: str, traffic_table: str, tra
             # If table creation/check fails, we cannot proceed with INSERT
             raise # Re-raise the exception
 
-
         # --- Insert the new transformed data ---
         print(f"\nInserting new transformed data into table '{transformed_table}'...")
         # Use the transformation_select_sql to insert data
-        insert_sql = f"INSERT INTO {transformed_table} {transformation_select_sql};"
+        insert_sql = f"INSERT INTO {transformed_table} BY NAME {transformation_select_sql};" # Use BY NAME for safer append
         duckdb_con.execute(insert_sql)
         print(f"✅ New transformed data inserted into '{transformed_table}'.")
 
@@ -188,4 +189,3 @@ if __name__ == "__main__":
             print(f"Standalone transformation run failed: {e}")
 
     print("\nStandalone transformation script finished.")
-

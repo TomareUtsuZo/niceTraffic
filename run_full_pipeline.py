@@ -65,8 +65,6 @@ TRANSFORMED_TABLE_NAME = TRANSFORMED_TABLE_NAME # Imported directly from transfo
 # For simplicity, let's define them here for the orchestration script
 WEATHER_LOCATIONS_TO_EXTRACT = [
     {"lat": 10.79187, "lon": 106.68831, "name": "Ho Chi Minh City"}, # Saigon
-    {"lat": 40.7128, "lon": -74.0060, "name": "New York City"},
-    {"lat": 51.5074, "lon": -0.1278, "name": "London"},
     # Add more locations as needed
 ]
 
@@ -194,7 +192,7 @@ if __name__ == "__main__":
             print(f"\nWeather Processing Summary:")
             print(f"Processed {len(WEATHER_LOCATIONS_TO_EXTRACT) - len(failed_weather_locations)} out of {len(WEATHER_LOCATIONS_TO_EXTRACT)} locations.")
             if failed_weather_locations:
-                print(f"Failed weather locations ({len(failed_weather_locations)}): {', '.join(failed_weather_locations)}")
+                print(f"Failed weather locations ({len(failed_weather_locations)}): {', '.join(failed_locations)}")
             else:
                 print("All weather locations processed successfully.")
 
@@ -214,37 +212,34 @@ if __name__ == "__main__":
     # --- Step 3: Run Transformation ---
     print("\n--- Step 3: Running Transformation ---")
     transformation_success = False
+
     # Only run transformation if both ETL steps had some success or didn't fail critically
-    if traffic_etl_success or weather_etl_success: # Decide your logic: require both or either? Let's require at least one loaded row for transformation to make sense.
-         # Check if the source tables actually exist and have data before transforming
-         try:
-             with duckdb.connect(database=db_path, read_only=True) as con:
-                 traffic_count = con.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{traffic_table}'").fetchone()[0] > 0 and con.execute(f"SELECT COUNT(*) FROM {traffic_table}").fetchone()[0] > 0
-                 weather_count = con.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{weather_table}'").fetchone()[0] > 0 and con.execute(f"SELECT COUNT(*) FROM {weather_table}").fetchone()[0] > 0
+    # Check if the source tables actually exist and have data before transforming
+    try:
+        with duckdb.connect(database=db_path, read_only=True) as con:
+            traffic_count = con.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{traffic_table}'").fetchone()[0] > 0 and con.execute(f"SELECT COUNT(*) FROM {traffic_table}").fetchone()[0] > 0
+            weather_count = con.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{weather_table}'").fetchone()[0] > 0 and con.execute(f"SELECT COUNT(*) FROM {weather_table}").fetchone()[0] > 0
 
-             if traffic_count and weather_count:
-                 try:
-                     # Call the transformation function
-                     run_transformation(db_path, weather_table, traffic_table, transformed_table)
-                     transformation_success = True
-                     print("✅ Transformation completed successfully.")
-                 except Exception as e:
-                     print(f"❌ An error occurred during Transformation: {e}")
-                     traceback.print_exc()
-                     pipeline_success = False
-             else:
-                 print("Skipping Transformation: One or both source tables are missing or empty.")
-                 if not traffic_count: print(f" - Traffic table '{traffic_table}' is missing or empty.")
-                 if not weather_count: print(f" - Weather table '{weather_table}' is missing or empty.")
+        if traffic_count and weather_count:
+            try:
+                # Call the transformation function
+                run_transformation(db_path, weather_table, traffic_table, transformed_table)
+                transformation_success = True
+                print("✅ Transformation completed successfully.")
+            except Exception as e:
+                print(f"❌ An error occurred during Transformation: {e}")
+                traceback.print_exc()
+                pipeline_success = False
+        else:
+            print("Skipping Transformation: One or both source tables are missing or empty.")
+            if not traffic_count: print(f" - Traffic table '{traffic_table}' is missing or empty.")
+            if not weather_count: print(f" - Weather table '{weather_table}' is missing or empty.")
 
 
-         except Exception as e:
-              print(f"❌ Error checking source tables before transformation: {e}")
-              traceback.print_exc()
-              pipeline_success = False
-
-    else:
-        print("Skipping Transformation: Both Traffic and Weather ETL steps were skipped or failed.")
+    except Exception as e:
+         print(f"❌ Error checking source tables before transformation: {e}")
+         traceback.print_exc()
+         pipeline_success = False
 
 
     # --- Step 4: Run Visualization ---
@@ -265,7 +260,7 @@ if __name__ == "__main__":
         print("Skipping Visualization: Transformation step was skipped or failed.")
 
 
-    # --- Pipeline Summary ---
+    # --- Full Pipeline Summary ---
     print("\n--- Full Pipeline Summary ---")
     pipeline_end_time = datetime.datetime.now()
     duration = pipeline_end_time - pipeline_start_time
@@ -279,4 +274,3 @@ if __name__ == "__main__":
     else:
         print("\n❌ Full pipeline execution failed or encountered errors in one or more steps.")
         print("Review the output above for details on which steps failed.")
-
