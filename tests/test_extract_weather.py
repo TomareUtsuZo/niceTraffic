@@ -15,15 +15,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.'))
 
 # Import the functions from the script
 try:
-    from extract_weather_duckdb import (
+    from ELTscripts.extract_weather_duckdb import ( # <-- Changed import path
         construct_weather_api_url,
         fetch_data_from_api,
         parse_weather_response_to_dataframe,
         save_weather_to_duckdb,
     )
 except ImportError as e:
-    pytest.fail(f"Failed to import functions from extract_weather_duckdb.py: {e}. "
-                "Ensure the script is in the same directory or the path is correct.")
+    pytest.fail(f"Failed to import functions from ELTscripts.extract_weather_duckdb.py: {e}. " # <-- Updated error message
+                "Ensure the script is in the ELTscripts subdirectory and the path is correct.")
 
 
 # --- Fixtures ---

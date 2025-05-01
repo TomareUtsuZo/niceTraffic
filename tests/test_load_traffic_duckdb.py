@@ -17,14 +17,13 @@ if project_root not in sys.path:
     # print(f"Added {project_root} to sys.path") # Optional: for debugging path issues
 
 # Import the function from the original script
-# Assuming load_traffic_duckdb.py is in the project root directory
+# Assuming load_traffic_duckdb.py is in the ELTscripts subdirectory
 try:
-    from load_traffic_duckdb import load_dataframe_to_duckdb
+    from ELTscripts.load_traffic_duckdb import load_dataframe_to_duckdb # <-- Changed import path
     # print("Successfully imported load_traffic_duckdb module.") # Optional: for debugging import
 except ImportError as e:
     # If import still fails, provide a more specific error message
-    pytest.fail(f"Failed to import load_traffic_duckdb. Check if the file exists in the project root ({project_root}) and if there are other import issues. Error: {e}")
-
+    pytest.fail(f"Failed to import load_traffic_duckdb from ELTscripts. Check if the file exists in the ELTscripts subdirectory ({project_root}\\ELTscripts) and if there are other import issues. Error: {e}") # <-- Updated error message
 # Use a temporary table name for the DuckDB database during tests
 TEST_TABLE_NAME = "test_traffic_flow_data"
 
@@ -83,7 +82,7 @@ def test_load_dataframe_to_duckdb_create_new_table(in_memory_duckdb_con):
     # Mock datetime.datetime.now to return a fixed timestamp for predictable testing
     fixed_timestamp = datetime.datetime(2023, 1, 1, 12, 0, 0)
     # Patch datetime.datetime within the load_traffic_duckdb module
-    with patch('load_traffic_duckdb.datetime') as mock_datetime_module:
+    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
         mock_datetime_module.datetime.now.return_value = fixed_timestamp
 
         # Call the function to load data
@@ -143,7 +142,7 @@ def test_load_dataframe_to_duckdb_append_to_existing_table(in_memory_duckdb_con)
 
     # Mock datetime.datetime.now for the second load
     fixed_timestamp_2 = datetime.datetime(2023, 1, 1, 12, 5, 0)
-    with patch('load_traffic_duckdb.datetime') as mock_datetime_module:
+    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
         mock_datetime_module.datetime.now.return_value = fixed_timestamp_2
 
         # Call the function to load the new data
@@ -192,7 +191,7 @@ def test_load_dataframe_to_duckdb_column_mismatch(in_memory_duckdb_con, capsys):
 
     # Mock datetime.datetime.now for the load attempt
     fixed_timestamp = datetime.datetime(2023, 1, 1, 12, 10, 0)
-    with patch('load_traffic_duckdb.datetime') as mock_datetime_module:
+    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
         mock_datetime_module.datetime.now.return_value = fixed_timestamp
 
         # Call the function - this should ideally print an error message
