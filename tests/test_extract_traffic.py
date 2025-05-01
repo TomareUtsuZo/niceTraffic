@@ -20,7 +20,7 @@ if project_root not in sys.path:
 # Import the functions from the original script
 # Assuming extract_traffic_duckdb.py is in the project root directory
 try:
-    from extract_traffic_duckdb import (
+    from ELTscripts.extract_traffic_duckdb import ( 
         construct_api_url,
         fetch_data_from_api,
         parse_traffic_response_to_dataframe,
@@ -30,8 +30,7 @@ try:
     # print("Successfully imported extract_traffic_duckdb module.") # Optional: for debugging import
 except ImportError as e:
     # If import still fails, provide a more specific error message
-    pytest.fail(f"Failed to import extract_traffic_duckdb. Check if the file exists in the project root ({project_root}) and if there are other import issues. Error: {e}")
-
+    pytest.fail(f"Failed to import extract_traffic_duckdb from ELTscripts. Check the path and if there are other import issues. Error: {e}") # <-- Updated error message
 
 # Define a dummy API key for testing purposes
 # In a real scenario, you might mock os.getenv as well, but using a dummy here is simpler
@@ -247,14 +246,14 @@ def test_extract_and_transform_traffic_data_success(mocker):
             return mock_xml_data_2
         return None
 
-    mocker.patch('extract_traffic_duckdb.fetch_data_from_api', side_effect=mock_fetch)
+    mocker.patch('ELTscripts.extract_traffic_duckdb.fetch_data_from_api', side_effect=mock_fetch) # <-- Added ELTscripts.
     # Fix: Do NOT mock construct_api_url here, let the real function generate the URL
     # mocker.patch('extract_traffic_duckdb.construct_api_url', return_value="http://fakeapi.com/url") # Removed this line
 
     # Mock datetime.datetime.now for predictable timestamp testing
     fixed_timestamp = datetime.datetime(2023, 1, 1, 12, 0, 0)
     # Fix: Patch the datetime module within extract_traffic_duckdb and set the return_value of datetime.datetime.now
-    with patch('extract_traffic_duckdb.datetime') as mock_datetime_module:
+    with patch('ELTscripts.extract_traffic_duckdb.datetime') as mock_datetime_module: 
         mock_datetime_module.datetime.now.return_value = fixed_timestamp
         # Removed mock_datetime.side_effect
 
@@ -305,14 +304,14 @@ def test_extract_and_transform_traffic_data_api_failure(mocker):
             return mock_xml_data_2
         return None
 
-    mocker.patch('extract_traffic_duckdb.fetch_data_from_api', side_effect=mock_fetch)
+    mocker.patch('ELTscripts.extract_traffic_duckdb.fetch_data_from_api', side_effect=mock_fetch) 
     # Fix: Do NOT mock construct_api_url here
     # mocker.patch('extract_traffic_duckdb.construct_api_url', return_value="http://fakeapi.com/url") # Removed this line
 
     # Mock datetime.datetime.now for predictable timestamp testing
     fixed_timestamp = datetime.datetime(2023, 1, 1, 12, 0, 0)
     # Fix: Patch the datetime module within extract_traffic_duckdb and set the return_value of datetime.datetime.now
-    with patch('extract_traffic_duckdb.datetime') as mock_datetime_module:
+    with patch('ELTscripts.extract_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
         mock_datetime_module.datetime.now.return_value = fixed_timestamp
         # Removed mock_datetime.side_effect
 
@@ -347,14 +346,14 @@ def test_extract_and_transform_traffic_data_parsing_failure(mocker):
             return mock_xml_data_2_valid
         return None
 
-    mocker.patch('extract_traffic_duckdb.fetch_data_from_api', side_effect=mock_fetch)
+    mocker.patch('ELTscripts.extract_traffic_duckdb.fetch_data_from_api', side_effect=mock_fetch) 
     # Fix: Do NOT mock construct_api_url here
     # mocker.patch('extract_traffic_duckdb.construct_api_url', return_value="http://fakeapi.com/url") # Removed this line
 
     # Mock datetime.datetime.now for predictable timestamp testing
     fixed_timestamp = datetime.datetime(2023, 1, 1, 12, 0, 0)
     # Fix: Patch the datetime module within extract_traffic_duckdb and set the return_value of datetime.datetime.now
-    with patch('extract_traffic_duckdb.datetime') as mock_datetime_module:
+    with patch('ELTscripts.extract_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
         mock_datetime_module.datetime.now.return_value = fixed_timestamp
         # Removed mock_datetime.side_effect
 
