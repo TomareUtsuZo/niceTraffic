@@ -8,14 +8,6 @@ import xml.etree.ElementTree as ET
 import datetime # Import datetime for timestamp checks
 import numpy as np # Import numpy for potential boolean type checks if needed, though == is preferred
 
-# --- Path Setup ---
-# Get the absolute path of the directory where pytest is being run (project root)
-# and add it to sys.path so modules like extract_traffic_duckdb can be found.
-# This is a more robust approach than relying solely on __file__ when tests are in a subdirectory.
-project_root = os.path.abspath(os.getcwd())
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-    # print(f"Added {project_root} to sys.path") # Optional: for debugging path issues
 
 # Import the functions from the original script
 # Assuming extract_traffic_duckdb.py is in the project root directory

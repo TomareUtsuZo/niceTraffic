@@ -1,17 +1,15 @@
 import pytest
 import os
 import sys
-import tempfile # Make sure tempfile is imported
+import tempfile 
 from unittest.mock import patch, MagicMock
 import pandas as pd
 import duckdb
 import requests
 import datetime
+from tests.testHelpers.duckdb_fixtures import temp_duckdb_file 
 
 
-# Add the directory containing the script to the Python path
-# This allows importing the script as a module
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 # Import the functions from the script
 try:
@@ -207,9 +205,9 @@ def test_parse_weather_response_to_dataframe_missing_keys(mock_weather_response_
 
 
 # Renamed fixture to temp_duckdb_path and updated the test to use it
-def test_save_weather_to_duckdb_success(temp_duckdb_path):
+def test_save_weather_to_duckdb_success(temp_duckdb_file): # Use the new fixture
     """Tests if save_weather_to_duckdb saves data correctly."""
-    db_path = temp_duckdb_path
+    db_path = temp_duckdb_file # Get the path from the fixture
     table_name = "test_weather_data"
 
     data = {
@@ -223,8 +221,10 @@ def test_save_weather_to_duckdb_success(temp_duckdb_path):
     }
     df_to_save = pd.DataFrame(data)
 
+    # save_weather_to_duckdb opens/closes its own connection, so we just pass the path
     save_weather_to_duckdb(df_to_save, db_path, table_name)
 
+    # Verify data using a new connection to the temp file
     with duckdb.connect(database=db_path, read_only=True) as con:
         tables = con.execute("SHOW TABLES").fetchall()
         assert (table_name,) in tables
@@ -248,26 +248,16 @@ def test_save_weather_to_duckdb_success(temp_duckdb_path):
         )
 
 
-# Renamed fixture to temp_duckdb_path and updated the test to use it
-def test_save_weather_to_duckdb_empty_df(temp_duckdb_path):
+def test_save_weather_to_duckdb_empty_df(temp_duckdb_file): # Use the new fixture
     """Tests if save_weather_to_duckdb handles empty DataFrame."""
-    db_path = temp_duckdb_path
+    db_path = temp_duckdb_file # Get the path from the fixture
     table_name = "test_weather_data_empty"
     df_to_save = pd.DataFrame()
 
+    # Call the function with the empty DataFrame
     save_weather_to_duckdb(df_to_save, db_path, table_name)
 
     # Verify the table was NOT created as df is empty
     # Check if the database file was even created (it shouldn't be if save_weather_to_duckdb exits early)
-    assert not os.path.exists(db_path)
-
-    # If the file *was* created (which indicates an issue), then connect and check the table
-    if os.path.exists(db_path):
-         try:
-            with duckdb.connect(database=db_path, read_only=True) as con:
-                tables = con.execute("SHOW TABLES").fetchall()
-                assert (table_name,) not in tables
-         except duckdb.duckdb.IOException as e:
-             print(f"\nWarning: IO Error when trying to connect to check empty db: {e}")
-         except Exception as e:
-              print(f"\nWarning: Unexpected error checking empty db: {e}")
+    # Now we check if the *file* exists at the path provided by the fixture
+    assert not os.path.exists(db_path), f"DuckDB file should not exist for empty DataFrame: {db_path}"

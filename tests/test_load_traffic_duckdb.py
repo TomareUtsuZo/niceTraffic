@@ -1,3 +1,5 @@
+# tests/test_load_traffic_duckdb.py
+
 import pytest
 import duckdb
 import pandas as pd
@@ -5,206 +7,176 @@ import os
 import sys
 from unittest.mock import patch, MagicMock
 import datetime
-import traceback # Import traceback for potential debugging in tests
+import traceback
 
-# --- Path Setup ---
-# Get the absolute path of the directory where pytest is being run (project root)
-# and add it to sys.path so modules like load_traffic_duckdb can be found.
-# This is a robust approach when tests are in a subdirectory.
-project_root = os.path.abspath(os.getcwd())
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-    # print(f"Added {project_root} to sys.path") # Optional: for debugging path issues
+# You no longer need the path setup here if it's in conftest.py
 
-# Import the function from the original script
-# Assuming load_traffic_duckdb.py is in the ELTscripts subdirectory
+# Import load_dataframe_to_duckdb (ensure path is correct, potentially via conftest path setup)
 try:
-    from ELTscripts.load_traffic_duckdb import load_dataframe_to_duckdb # <-- Changed import path
-    # print("Successfully imported load_traffic_duckdb module.") # Optional: for debugging import
+    from ELTscripts.load_traffic_duckdb import load_dataframe_to_duckdb
 except ImportError as e:
-    # If import still fails, provide a more specific error message
-    pytest.fail(f"Failed to import load_traffic_duckdb from ELTscripts. Check if the file exists in the ELTscripts subdirectory ({project_root}\\ELTscripts) and if there are other import issues. Error: {e}") # <-- Updated error message
-# Use a temporary table name for the DuckDB database during tests
+    pytest.fail(f"Failed to import load_traffic_duckdb from ELTscripts. Check the path and if there are other import issues. Error: {e}")
+
+# Import helper functions from duckdb_fixtures.py
+# Ensure the path is correct based on your project structure
+from tests.testHelpers.duckdb_fixtures import (
+    table_exists,
+    get_row_count,
+    get_table_data, # Also import get_table_data if you used it
+    # Import any other helpers/fixtures you need directly here if not relying solely on conftest auto-discovery
+    # e.g., temp_duckdb_con, traffic_table, etc.
+)
+
+
 TEST_TABLE_NAME = "test_traffic_flow_data"
 
-@pytest.fixture(scope="function")
-def in_memory_duckdb_con():
-    """Fixture to provide a temporary in-memory DuckDB connection for each test."""
-    # Using ':memory:' creates a database in RAM that is destroyed after the connection closes
-    print("\nSetting up in-memory DuckDB connection...")
-    con = duckdb.connect(database=':memory:', read_only=False)
-    yield con
-    # Close the connection after the test function finishes
-    print("\nTearing down in-memory DuckDB connection...")
-    con.close()
+# Test functions now request the necessary fixtures
 
-# --- Tests for load_dataframe_to_duckdb ---
-
-def test_load_dataframe_to_duckdb_empty_dataframe(in_memory_duckdb_con):
+def test_load_dataframe_to_duckdb_empty_dataframe(temp_duckdb_con):
     """Test loading an empty DataFrame should not create a table or load data."""
-    con = in_memory_duckdb_con
+    con = temp_duckdb_con
     point_identifier = "10.0,20.0"
 
-    # Create an empty DataFrame with expected columns (schema matters even if empty)
     empty_data = {
         'frc': [], 'currentSpeed': [], 'freeFlowSpeed': [], 'currentTravelTime': [],
         'freeFlowTravelTime': [], 'confidence': [], 'roadClosure': []
     }
     df = pd.DataFrame(empty_data)
 
-    # Call the function with the empty DataFrame
     load_dataframe_to_duckdb(con, df, TEST_TABLE_NAME, point_identifier)
 
-    # Verify the table was NOT created
-    tables = con.execute("SHOW TABLES").fetchall()
-    assert (TEST_TABLE_NAME,) not in tables, f"Table '{TEST_TABLE_NAME}' should not exist for empty DataFrame."
+    # Use the helper function to check if the table exists
+    assert not table_exists(con, TEST_TABLE_NAME), f"Table '{TEST_TABLE_NAME}' should not exist for empty DataFrame."
 
     print("test_load_dataframe_to_duckdb_empty_dataframe passed.")
 
 
-def test_load_dataframe_to_duckdb_create_new_table(in_memory_duckdb_con):
+def test_load_dataframe_to_duckdb_create_new_table(temp_duckdb_con):
     """Test loading data when the table does not exist, should create the table."""
-    con = in_memory_duckdb_con
+    con = temp_duckdb_con
     point_identifier = "10.0,20.0"
 
-    # Create a sample DataFrame
     data = {
-        'frc': ['FRC0'],
-        'currentSpeed': [50],
-        'freeFlowSpeed': [60],
-        'currentTravelTime': [120],
-        'freeFlowTravelTime': [100],
-        'confidence': [1.0],
-        'roadClosure': [False]
+        'frc': ['FRC0'], 'currentSpeed': [50], 'freeFlowSpeed': [60],
+        'currentTravelTime': [120], 'freeFlowTravelTime': [100],
+        'confidence': [1.0], 'roadClosure': [False]
     }
     df = pd.DataFrame(data)
 
-    # Mock datetime.datetime.now to return a fixed timestamp for predictable testing
     fixed_timestamp = datetime.datetime(2023, 1, 1, 12, 0, 0)
-    # Patch datetime.datetime within the load_traffic_duckdb module
-    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
+    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module:
         mock_datetime_module.datetime.now.return_value = fixed_timestamp
 
-        # Call the function to load data
         load_dataframe_to_duckdb(con, df, TEST_TABLE_NAME, point_identifier)
 
-    # Verify the table was created
-    tables = con.execute("SHOW TABLES").fetchall()
-    assert (TEST_TABLE_NAME,) in tables, f"Table '{TEST_TABLE_NAME}' should have been created."
+    # Use the helper function to check if the table exists
+    assert table_exists(con, TEST_TABLE_NAME), f"Table '{TEST_TABLE_NAME}' should have been created."
 
-    # Verify the data was loaded correctly, including added columns
-    loaded_df = con.execute(f"SELECT * FROM {TEST_TABLE_NAME}").fetchdf()
+    # Use the helper function to get row count and data
+    assert get_row_count(con, TEST_TABLE_NAME) == 1, "DataFrame should contain exactly one row after load."
+    loaded_df = get_table_data(con, TEST_TABLE_NAME)
 
-    assert len(loaded_df) == 1, "DataFrame should contain exactly one row after load."
     assert loaded_df['frc'].iloc[0] == 'FRC0'
     assert loaded_df['currentSpeed'].iloc[0] == 50
     assert loaded_df['point'].iloc[0] == point_identifier
-    # Check if the timestamp is close to the fixed timestamp (allow for minor differences)
-    assert (loaded_df['extraction_timestamp'].iloc[0] - fixed_timestamp).total_seconds() < 1, "Timestamp should match the mocked time."
+    assert (loaded_df['extraction_timestamp'].iloc[0] - fixed_timestamp).total_seconds() < 1
 
     print("test_load_dataframe_to_duckdb_create_new_table passed.")
 
 
-def test_load_dataframe_to_duckdb_append_to_existing_table(in_memory_duckdb_con):
+def test_load_dataframe_to_duckdb_append_to_existing_table(traffic_table):
     """Test loading data when the table already exists, should append data."""
-    con = in_memory_duckdb_con
+    # Request the traffic_table fixture to automatically create the table
+    con = traffic_table
+
     point_identifier_1 = "10.0,20.0"
     point_identifier_2 = "11.0,21.0"
 
-    # Create the table with initial data using the connection directly
+    # Insert initial data using the connection from the fixture
     initial_data = {
-        'frc': ['FRC0'],
-        'currentSpeed': [50],
-        'freeFlowSpeed': [60],
-        'currentTravelTime': [120],
-        'freeFlowTravelTime': [100],
-        'confidence': [1.0],
-        'roadClosure': [False],
-        'point': [point_identifier_1],
-        'extraction_timestamp': [datetime.datetime.now()] # Use real time for initial data
+        'frc': ['FRC0'], 'currentSpeed': [50], 'freeFlowSpeed': [60],
+        'currentTravelTime': [120], 'freeFlowTravelTime': [100],
+        'confidence': [1.0], 'roadClosure': [False],
+        'point': [point_identifier_1], 'extraction_timestamp': [datetime.datetime.now()]
     }
     initial_df = pd.DataFrame(initial_data)
-    con.execute(f"CREATE TABLE {TEST_TABLE_NAME} AS SELECT * FROM initial_df")
-    print(f"Created initial table '{TEST_TABLE_NAME}' with 1 row.")
+    con.execute("INSERT INTO traffic_flow_data SELECT * FROM initial_df") # Use the table name created by the fixture
+    print(f"Created initial table '{con.execute('SHOW TABLES').fetchone()[0]}' with 1 row.")
 
 
-    # Create a new DataFrame to append
     new_data = {
-        'frc': ['FRC1'],
-        'currentSpeed': [30],
-        'freeFlowSpeed': [40],
-        'currentTravelTime': [200],
-        'freeFlowTravelTime': [150],
-        'confidence': [0.9],
-        'roadClosure': [True]
+        'frc': ['FRC1'], 'currentSpeed': [30], 'freeFlowSpeed': [40],
+        'currentTravelTime': [200], 'freeFlowTravelTime': [150],
+        'confidence': [0.9], 'roadClosure': [True]
     }
     new_df = pd.DataFrame(new_data)
 
-    # Mock datetime.datetime.now for the second load
     fixed_timestamp_2 = datetime.datetime(2023, 1, 1, 12, 5, 0)
-    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
+    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module:
         mock_datetime_module.datetime.now.return_value = fixed_timestamp_2
 
-        # Call the function to load the new data
-        load_dataframe_to_duckdb(con, new_df, TEST_TABLE_NAME, point_identifier_2)
+        # Load the new data into the existing table
+        load_dataframe_to_duckdb(con, new_df, con.execute('SHOW TABLES').fetchone()[0], point_identifier_2) # Use table name from fixture
 
-    # Verify the total number of rows
-    total_rows = con.execute(f"SELECT COUNT(*) FROM {TEST_TABLE_NAME}").fetchone()[0]
-    assert total_rows == 2, f"Table '{TEST_TABLE_NAME}' should contain 2 rows after appending."
+    # Use helper function to verify total rows
+    assert get_row_count(con, con.execute('SHOW TABLES').fetchone()[0]) == 2, "Table should contain 2 rows after appending."
 
-    # Verify the new data was appended correctly
-    loaded_df_new = con.execute(f"SELECT * FROM {TEST_TABLE_NAME} WHERE point = '{point_identifier_2}'").fetchdf()
+    # Use helper function to get specific data
+    loaded_df_new = con.execute(f"SELECT * FROM {con.execute('SHOW TABLES').fetchone()[0]} WHERE point = '{point_identifier_2}'").fetchdf()
 
-    assert len(loaded_df_new) == 1, "Should have loaded exactly one new row for the second point."
+    assert len(loaded_df_new) == 1
     assert loaded_df_new['frc'].iloc[0] == 'FRC1'
     assert loaded_df_new['currentSpeed'].iloc[0] == 30
     assert loaded_df_new['point'].iloc[0] == point_identifier_2
-    assert (loaded_df_new['extraction_timestamp'].iloc[0] - fixed_timestamp_2).total_seconds() < 1, "Timestamp for appended data should match the mocked time."
+    assert (loaded_df_new['extraction_timestamp'].iloc[0] - fixed_timestamp_2).total_seconds() < 1
 
     print("test_load_dataframe_to_duckdb_append_to_existing_table passed.")
 
 
-def test_load_dataframe_to_duckdb_column_mismatch(in_memory_duckdb_con, capsys):
+def test_load_dataframe_to_duckdb_column_mismatch(temp_duckdb_con, capsys):
     """Test loading a DataFrame with columns that don't match the existing table."""
-    con = in_memory_duckdb_con
-    point_identifier = "10.0,20.0"
-    initial_table_name = "mismatch_test_table" # Use a different table name for isolation
+    con = temp_duckdb_con
+    initial_table_name = "mismatch_test_table"
 
-    # Create the table with initial data (subset of columns)
+    # Create the table manually here if its schema is specific to this test
+    # Or create a specific fixture for this schema in duckdb_fixtures.py
+    initial_schema_sql = """
+    CREATE TABLE mismatch_test_table (
+        frc VARCHAR,
+        currentSpeed INTEGER,
+        point VARCHAR,
+        extraction_timestamp TIMESTAMP
+    )
+    """
+    con.execute(initial_schema_sql)
+
     initial_data = {
-        'frc': ['FRC0'],
-        'currentSpeed': [50],
-        'point': [point_identifier],
-        'extraction_timestamp': [datetime.datetime.now()]
+        'frc': ['FRC0'], 'currentSpeed': [50],
+        'point': ["10.0,20.0"], 'extraction_timestamp': [datetime.datetime.now()]
     }
     initial_df = pd.DataFrame(initial_data)
-    con.execute(f"CREATE TABLE {initial_table_name} AS SELECT * FROM initial_df")
+    con.execute(f"INSERT INTO {initial_table_name} SELECT * FROM initial_df")
     print(f"Created initial table '{initial_table_name}' with subset of columns.")
 
-    # Create a new DataFrame with different columns (missing some, adding others)
+
     new_data = {
         'frc': ['FRC1'],
-        'freeFlowSpeed': [40], # Different column name
-        'extra_col': ['test'] # Extra column
+        'freeFlowSpeed': [40],
+        'extra_col': ['test']
     }
     new_df = pd.DataFrame(new_data)
 
-    # Mock datetime.datetime.now for the load attempt
     fixed_timestamp = datetime.datetime(2023, 1, 1, 12, 10, 0)
-    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module: # <-- Added ELTscripts.
+    with patch('ELTscripts.load_traffic_duckdb.datetime') as mock_datetime_module:
         mock_datetime_module.datetime.now.return_value = fixed_timestamp
 
-        # Call the function - this should ideally print an error message
-        load_dataframe_to_duckdb(con, new_df, initial_table_name, point_identifier)
+        load_dataframe_to_duckdb(con, new_df, initial_table_name, "11.0,21.0") # Use correct table name
 
-    # Verify the number of rows in the table hasn't changed
-    total_rows_after_attempt = con.execute(f"SELECT COUNT(*) FROM {initial_table_name}").fetchone()[0]
-    assert total_rows_after_attempt == 1, "Number of rows should not change due to column mismatch."
+    # Use helper function to verify row count hasn't changed
+    assert get_row_count(con, initial_table_name) == 1, "Number of rows should not change due to column mismatch."
 
-    # Optionally, check if an error message was printed (requires capsys fixture)
     captured = capsys.readouterr()
     assert "DuckDB Error loading data" in captured.out or "DuckDB Error loading data" in captured.err, \
         "Should print a DuckDB Error message due to column mismatch."
 
     print("test_load_dataframe_to_duckdb_column_mismatch passed.")
-
